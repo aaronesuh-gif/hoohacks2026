@@ -5,7 +5,6 @@ SQLite + SQLAlchemy database for storing dining hall menu items.
 The database file (dining.db) is created automatically on first run.
 """
 
-from datetime import datetime
 from typing import Optional
  
 from sqlalchemy import (
@@ -23,7 +22,7 @@ from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 # Base & Engine
 # ---------------------------------------------------------------------------
  
-DATABASE_URL = "sqlite:///dining.db"
+DATABASE_URL = "sqlite:///Database/dining.db"
 engine = create_engine(DATABASE_URL, echo=False)
 SessionLocal = sessionmaker(bind=engine)
  
@@ -49,16 +48,16 @@ class DiningItem(Base):
  
     # --- Nutrition (all per-serving, nullable in case scraper can't find them) ---
     serving_size = Column(String,  nullable=True)         # e.g. "1 cup", "4 oz"
-    calories = Column(Integer, nullable=True)
-    total_fat_g = Column(Float,   nullable=True)
+    calories     = Column(Integer, nullable=True)
+    total_fat_g  = Column(Float,   nullable=True)
     saturated_fat_g = Column(Float, nullable=True)
-    trans_fat_g = Column(Float,   nullable=True)
-    cholesterol_mg = Column(Float, nullable=True)
-    sodium_mg = Column(Float,   nullable=True)
-    total_carbs_g = Column(Float, nullable=True)
+    trans_fat_g  = Column(Float,   nullable=True)
+    cholesterol_mg  = Column(Float, nullable=True)
+    sodium_mg    = Column(Float,   nullable=True)
+    total_carbs_g   = Column(Float, nullable=True)
     dietary_fiber_g = Column(Float, nullable=True)
-    total_sugars_g = Column(Float, nullable=True)
-    protein_g = Column(Float,   nullable=True)
+    total_sugars_g  = Column(Float, nullable=True)
+    protein_g    = Column(Float,   nullable=True)
  
     # --- Dietary tags (True = item meets that label) ---
     is_vegan          = Column(Boolean, default=False)
@@ -71,8 +70,6 @@ class DiningItem(Base):
     contains_eggs     = Column(Boolean, default=False)
     contains_soy      = Column(Boolean, default=False)
     contains_shellfish = Column(Boolean, default=False)
-
-    #
  
     def __repr__(self) -> str:
         return f"<DiningItem id={self.id} name={self.name!r} hall={self.dining_hall!r}>"
@@ -218,43 +215,4 @@ class Database:
             session.delete(item)
             session.commit()
             return True
-        
-
-# ---------------------------------------------------------------------------
-# Quick smoke-test (run this file directly to verify setup)
-# ---------------------------------------------------------------------------
- 
-if __name__ == "__main__":
-    db = Database()
- 
-    db.add_item({
-        "name": "Grilled Chicken Breast",
-        "dining_hall": "Newcomb",
-        "category": "Entrées",
-        "calories": 280,
-        "protein_g": 34,
-        "total_fat_g": 6,
-        "sodium_mg": 410,
-        "is_gluten_free": True,
-        "is_halal": True,
-    })
- 
-    db.add_item({
-        "name": "Black Bean Burger",
-        "dining_hall": "Runk",
-        "category": "Grill",
-        "calories": 390,
-        "protein_g": 16,
-        "total_carbs_g": 52,
-        "is_vegan": True,
-        "is_vegetarian": True,
-    })
- 
-    items = db.get_all_items()
-    print(f"Total items in DB: {len(items)}")
-    for item in items:
-        print(f"  {item.name} @ {item.dining_hall} — {item.calories} cal")
- 
-    vegan = db.filter_by_tags(vegan=True)
-    print(f"\nVegan items: {[i.name for i in vegan]}")
  
