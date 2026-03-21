@@ -26,6 +26,14 @@ class SimilarityEngine:
     to surface meals similar to what you enjoy,
     not avoid meals similar to what you dislike
     (that would over-restrict recommendations).
+
+    CHANGE from previous version:
+      feature vectors are now built from the assembled meal's
+      combined macros and protein type — this stays the same.
+      the similarity engine operates at the assembled meal level
+      because it compares whole meals against whole liked meals.
+      component clusters are handled by the preference model —
+      similarity stays at the meal level for a cleaner signal.
     """
 
     ALL_PROTEINS = [
@@ -34,9 +42,9 @@ class SimilarityEngine:
     ]
 
     def __init__(self, db_path="database/meals.db"):
-        self.db_path     = db_path
-        self.liked_meals = []    # list of feature vectors for liked meals
-        self.scaler      = StandardScaler()
+        self.db_path       = db_path
+        self.liked_meals   = []    # list of feature vectors for liked meals
+        self.scaler        = StandardScaler()
         self.scaler_fitted = False
         self.load_liked_meals()
 
@@ -46,22 +54,30 @@ class SimilarityEngine:
 
     def build_feature_vector(self, meal):
         """
-        Identical structure to ClusterModel.build_feature_vector.
-        Consistency is critical — similarity is only meaningful
-        if both meals being compared are represented
-        the same way.
+        Builds the numerical representation of an assembled meal.
+
+        Uses the meal's total combined macros and dominant
+        protein type — not individual components.
 
         13 features total:
           [calories, protein, carbs, fats,
            has_chicken, has_beef, has_pork, has_fish,
            has_turkey, has_tofu, has_egg, has_lamb,
            has_vegetarian]
+
+        protein_type should be the protein component's type —
+        set by protein_detector.py when the meal is assembled.
+        e.g. "Grilled Chicken + Brown Rice + Broccoli"
+             protein_type = "chicken" from the chicken component
+
+        Consistent with ClusterModel.build_feature_vector
+        so both models operate in the same feature space.
         """
         macro_features = [
-            meal["calories"],
-            meal["protein"],
-            meal["carbs"],
-            meal["fats"]
+            meal.get("calories", 0),
+            meal.get("protein",  0),
+            meal.get("carbs",    0),
+            meal.get("fats",     0)
         ]
         protein_flags = [
             1 if p == meal.get("protein_type", "unknown") else 0
@@ -116,8 +132,8 @@ class SimilarityEngine:
 
     def get_similarity_score(self, meal):
         """
-        Compares this meal against every previously liked meal
-        using cosine similarity.
+        Compares this assembled meal against every previously
+        liked meal using cosine similarity.
 
         Cosine similarity measures the angle between two vectors:
           1.0 = identical direction  (same macro + protein profile)
@@ -131,6 +147,16 @@ class SimilarityEngine:
         Returns 0.5 neutral if no liked history exists yet.
         This keeps the similarity signal from penalizing
         new users who have no history.
+
+        meal = assembled meal dict with combined macros:
+          {
+            "meal_name":    "Grilled Chicken + Brown Rice + Broccoli",
+            "calories":     680,
+            "protein":      48,
+            "carbs":        72,
+            "fats":         14,
+            "protein_type": "chicken"
+          }
         """
         if not self.liked_meals:
             return 0.5   # no history yet, neutral score
@@ -140,7 +166,7 @@ class SimilarityEngine:
         # scale using the fitted scaler
         if self.scaler_fitted:
             try:
-                meal_vector_scaled = self.scaler.transform(meal_vector)
+                meal_vector_scaled  = self.scaler.transform(meal_vector)
                 liked_matrix_scaled = self.scaler.transform(
                     np.array(self.liked_meals)
                 )
@@ -164,14 +190,14 @@ class SimilarityEngine:
 
     def get_top_similar_meals(self, meal, meals_list, n=3):
         """
-        Finds the N most similar meals to a given meal
-        from a list of available meals.
+        Finds the N most similar assembled meals to a given meal
+        from todays available meals.
 
         Used to show "Similar meals you might like"
         section on the meal card in the UI.
 
-        meal       = the reference meal
-        meals_list = list of todays available meals to compare against
+        meal       = the reference assembled meal
+        meals_list = list of todays available assembled meals
         n          = how many similar meals to return
         """
         if not meals_list:
@@ -192,7 +218,7 @@ class SimilarityEngine:
             scored.append((candidate, similarity))
 
         scored.sort(key=lambda x: x[1], reverse=True)
-        return [meal for meal, score in scored[:n]]
+        return [m for m, score in scored[:n]]
 
     # ─────────────────────────────────────────────────────
     # LEARNING — UPDATE FROM FEEDBACK
@@ -201,15 +227,18 @@ class SimilarityEngine:
     def update(self, meal, liked: bool):
         """
         Called on every 👍 press.
-        Adds the meal's feature vector to the liked bank
+        Adds the assembled meal's feature vector to the liked bank
         so future similarity comparisons include it.
 
         👎 presses are ignored intentionally —
         we only track positive signal here.
-        The preference model handles dislike tracking.
+        The preference model handles dislike tracking
+        at the component and cluster level.
 
         Also refits the scaler when new data is added
         so scaling stays accurate as history grows.
+
+        meal = assembled meal dict with combined macros
         """
         if not liked:
             return   # only track liked meals
@@ -223,12 +252,13 @@ class SimilarityEngine:
         self.scaler_fitted = True
 
     # ─────────────────────────────────────────────────────
-    # STATS — FOR DEBUGGING
+    # STATS — FOR DEBUGGING AND STATS PAGE
     # ─────────────────────────────────────────────────────
 
     def get_liked_count(self):
         """
         Returns how many liked meals are in the comparison bank.
         Used in stats page to show how much data the model has.
+        More liked meals = more accurate similarity scores.
         """
         return len(self.liked_meals)

@@ -6,25 +6,51 @@ from scipy.stats import beta
 class PreferenceModel:
     """
     Tracks meal preferences using Thompson Sampling.
-    
+
     Maintains two levels of preference signal:
       component level  → tracks individual food items
                          "you liked grilled chicken 8 times"
-      cluster level    → tracks meal types
-                         "you liked high protein low carb meals 14 times"
-    
-    When scoring a new meal:
-      seen before  → blends exact component history with cluster history
-      never seen   → relies entirely on cluster history
-    
-    This means even brand new menu items get intelligent scores
-    based on what type of meal they are, not just their exact name.
+      cluster level    → tracks food categories per component
+                         "you liked lean protein items 14 times"
+
+    KEY CHANGE — component clusters instead of meal clusters:
+      each component gets its own cluster_id based on what
+      type of food it is (lean protein, clean starch, etc.)
+      rather than the assembled meal getting one cluster.
+
+      this means:
+        "Grilled Chicken" → cluster A (lean protein)
+        "Brown Rice"      → cluster B (clean starch)
+        "Broccoli"        → cluster D (green vegetable)
+
+      when scoring a meal each component is scored against
+      its own specific cluster — much cleaner signal than
+      one cluster representing the whole assembled meal.
+
+      liking "Grilled Chicken + Brown Rice + Broccoli":
+        cluster A (lean protein) alpha += 1
+        cluster B (clean starch) alpha += 1
+        cluster D (green veg)    alpha += 1
+
+      next time any lean protein appears, cluster A signal
+      carries it — even if the exact item name is new.
     """
+
+    CLUSTER_LABELS = {
+        "A": "Lean Protein",
+        "B": "Clean Starch",
+        "C": "Heavy Starch",
+        "D": "Green Vegetable",
+        "E": "Red Meat",
+        "F": "Plant Protein",
+        "G": "Sauce / Topping"
+    }
 
     def __init__(self, db_path="database/meals.db"):
         self.db_path       = db_path
-        self.meal_stats    = {}   # { meal_name:  { alpha: int, beta: int } }
-        self.cluster_stats = {}   # { cluster_id: { alpha: int, beta: int } }
+        self.meal_stats    = {}   # { component_name: { alpha: int, beta: int } }
+        self.cluster_stats = {}   # { cluster_id:     { alpha: int, beta: int } }
+                                  # cluster_id is now a letter: A B C D E F G
         self.load_from_db()
 
     # ─────────────────────────────────────────────────────
@@ -56,6 +82,7 @@ class PreferenceModel:
             }
 
         # load cluster level preferences
+        # cluster_id is now a letter string: "A", "B", "C" etc
         rows = conn.execute("""
             SELECT cluster_id, likes, dislikes
             FROM cluster_preferences
@@ -102,6 +129,7 @@ class PreferenceModel:
     def save_cluster_to_db(self, cluster_id):
         """
         Persists updated cluster counts back to SQLite.
+        cluster_id is a letter string: "A", "B", "C" etc.
         Called alongside save_component_to_db on every
         feedback event so both levels stay in sync.
         """
@@ -129,6 +157,11 @@ class PreferenceModel:
         """
         Scores a single food component using Thompson Sampling.
 
+        cluster_id is now specific to THIS component —
+        not the assembled meal. so "Grilled Chicken" always
+        gets scored against cluster A (lean protein) regardless
+        of what other items it is assembled with.
+
         Thompson Sampling works by drawing a random sample from
         a beta distribution shaped by like/dislike counts:
 
@@ -151,7 +184,7 @@ class PreferenceModel:
 
         Two signals blended:
           exact component history  → specific to this food item
-          cluster history          → general meal type preference
+          cluster history          → general food category preference
         """
 
         # signal 1 — exact component history
@@ -163,7 +196,7 @@ class PreferenceModel:
             exact_score = None
             has_history = False
 
-        # signal 2 — cluster level history
+        # signal 2 — component cluster history
         # initializes neutral if this cluster has never been rated
         if cluster_id not in self.cluster_stats:
             self.cluster_stats[cluster_id] = {"alpha": 1, "beta": 1}
@@ -183,35 +216,53 @@ class PreferenceModel:
 
         return float(np.clip(score, 0.0, 1.0))
 
-    def get_meal_score(self, components, cluster_id):
+    def get_meal_score(self, components_with_clusters):
         """
-        Scores a full assembled meal by averaging the
-        preference score across all of its components.
+        Scores a full assembled meal by averaging the preference
+        score across all components, each against its own cluster.
 
-        components = ["Grilled Chicken", "Brown Rice", "Broccoli"]
-        cluster_id = cluster this meal belongs to
+        CHANGED from previous version:
+          before: get_meal_score(components, cluster_id)
+                  one cluster_id for the whole meal
+          after:  get_meal_score(components_with_clusters)
+                  each component paired with its own cluster_id
 
-        Averaging means:
-          if you love chicken but are neutral on rice and broccoli
-          the meal still scores reasonably well overall
-          no single component dominates the score
+        components_with_clusters = [
+            {"name": "Grilled Chicken", "cluster_id": "A"},
+            {"name": "Brown Rice",      "cluster_id": "B"},
+            {"name": "Broccoli",        "cluster_id": "D"}
+        ]
+
+        each component scored against its own specific cluster:
+          "Grilled Chicken" → scored vs cluster A (lean protein history)
+          "Brown Rice"      → scored vs cluster B (clean starch history)
+          "Broccoli"        → scored vs cluster D (green veg history)
+
+        this means:
+          liking chicken builds cluster A signal
+          liking brown rice builds cluster B signal separately
+          disliking pasta builds cluster C signal separately
+          these never bleed into each other
         """
-        if not components:
+        if not components_with_clusters:
             return 0.5   # empty meal, return neutral
 
         scores = [
-            self.get_component_score(component, cluster_id)
-            for component in components
+            self.get_component_score(c["name"], c["cluster_id"])
+            for c in components_with_clusters
         ]
         return float(np.mean(scores))
 
-    def get_confidence(self, components):
+    def get_confidence(self, components_with_clusters):
         """
         Returns a human readable confidence label for the UI.
 
         Finds the component with the most interaction history
         and uses its like/dislike ratio to determine the label.
         The most interacted component is the most reliable signal.
+
+        CHANGED: now accepts components_with_clusters list
+        to stay consistent with get_meal_score signature.
 
         Returns one of:
           "love"    → ❤️  You love this      ratio >= 0.8
@@ -224,13 +275,14 @@ class PreferenceModel:
         best_total     = 0
 
         # find component with most interaction data
-        for component in components:
-            if component in self.meal_stats:
-                s     = self.meal_stats[component]
-                total = s["alpha"] + s["beta"] - 2  # subtract offsets
+        for c in components_with_clusters:
+            name = c["name"]
+            if name in self.meal_stats:
+                s     = self.meal_stats[name]
+                total = s["alpha"] + s["beta"] - 2   # subtract offsets
                 if total > best_total:
                     best_total     = total
-                    best_component = component
+                    best_component = name
 
         # no meaningful history on any component
         if best_component is None or best_total < 2:
@@ -249,58 +301,79 @@ class PreferenceModel:
     # LEARNING — UPDATE FROM USER FEEDBACK
     # ─────────────────────────────────────────────────────
 
-    def update(self, components, cluster_id, liked: bool):
+    def update(self, components_with_clusters, liked: bool):
         """
         Called every time the user presses 👍 or 👎.
 
-        Updates BOTH levels simultaneously:
-          component level  → each ingredient builds its own history
-          cluster level    → the meal type as a whole builds history
+        CHANGED from previous version:
+          before: update(components, cluster_id, liked)
+                  one cluster_id updated for all components
+          after:  update(components_with_clusters, liked)
+                  each component updates its own cluster separately
 
-        Updating each component separately is critical for
-        handling rotating menus — if you like chicken in one
-        meal, that history transfers to chicken in any future
-        meal even if the full dish name is completely different.
+        components_with_clusters = [
+            {"name": "Grilled Chicken", "cluster_id": "A"},
+            {"name": "Brown Rice",      "cluster_id": "B"},
+            {"name": "Broccoli",        "cluster_id": "D"}
+        ]
 
-        Example:
-          👍 on "Grilled Chicken + Brown Rice + Broccoli"
-          updates:
-            "Grilled Chicken" alpha += 1
-            "Brown Rice"      alpha += 1
-            "Broccoli"        alpha += 1
-            cluster_2         alpha += 1
+        👍 on this meal updates:
+          "Grilled Chicken" exact history alpha += 1
+          cluster A (lean protein)        alpha += 1
 
-          Next time "Herb Roasted Chicken" appears:
-            exact score   → 0.5 neutral  (never seen this name)
-            cluster score → high         (cluster 2 well liked)
-            final score   → pulled up by cluster history
+          "Brown Rice" exact history      alpha += 1
+          cluster B (clean starch)        alpha += 1
+
+          "Broccoli" exact history        alpha += 1
+          cluster D (green vegetable)     alpha += 1
+
+        this is the core advantage of component clusters —
+        disliking a meal with pasta builds cluster C signal
+        without affecting cluster A or B signal at all.
+        the model learns food category preferences independently.
+
+        soft dislike penalty for first time components:
+          if a component has never been seen before and appears
+          in a disliked meal, it gets a 0.5 penalty instead of 1.0
+          because the dislike might be about the combination
+          not the ingredient itself.
         """
+        for c in components_with_clusters:
+            name       = c["name"]
+            cluster_id = c["cluster_id"]
 
-        # update each component individually
-        for component in components:
-
-            # initialize if first time seeing this component
-            if component not in self.meal_stats:
-                self.meal_stats[component] = {"alpha": 1, "beta": 1}
+            # initialize component if first time seeing it
+            if name not in self.meal_stats:
+                self.meal_stats[name] = {"alpha": 1, "beta": 1}
 
             if liked:
-                self.meal_stats[component]["alpha"] += 1
+                # full credit on likes — explicit positive signal
+                self.meal_stats[name]["alpha"] += 1
             else:
-                self.meal_stats[component]["beta"]  += 1
+                # check if this is first time seeing this component
+                total = (self.meal_stats[name]["alpha"] +
+                         self.meal_stats[name]["beta"] - 2)
+                if total == 0:
+                    # never seen before — soft penalty
+                    # dislike might be about the combination
+                    # not this specific ingredient
+                    self.meal_stats[name]["beta"] += 0.5
+                else:
+                    # seen before — full penalty
+                    self.meal_stats[name]["beta"] += 1
 
-            # persist immediately — never lose data
-            self.save_component_to_db(component)
+            self.save_component_to_db(name)
 
-        # update cluster level
-        if cluster_id not in self.cluster_stats:
-            self.cluster_stats[cluster_id] = {"alpha": 1, "beta": 1}
+            # update this component's specific cluster
+            if cluster_id not in self.cluster_stats:
+                self.cluster_stats[cluster_id] = {"alpha": 1, "beta": 1}
 
-        if liked:
-            self.cluster_stats[cluster_id]["alpha"] += 1
-        else:
-            self.cluster_stats[cluster_id]["beta"]  += 1
+            if liked:
+                self.cluster_stats[cluster_id]["alpha"] += 1
+            else:
+                self.cluster_stats[cluster_id]["beta"]  += 1
 
-        self.save_cluster_to_db(cluster_id)
+            self.save_cluster_to_db(cluster_id)
 
     # ─────────────────────────────────────────────────────
     # STATS — FOR THE STATS PAGE UI
@@ -332,7 +405,8 @@ class PreferenceModel:
                 "likes":      s["alpha"] - 1,
                 "dislikes":   s["beta"]  - 1,
                 "total":      total,
-                "confidence": self.get_confidence([meal_name])
+                "confidence": self.get_confidence([{"name": meal_name,
+                                                    "cluster_id": "A"}])
             })
 
         return sorted(
@@ -350,13 +424,14 @@ class PreferenceModel:
 
     def get_cluster_summary(self):
         """
-        Returns like/dislike summary per cluster.
-        Used on stats page to show which meal types
+        Returns like/dislike summary per cluster with readable labels.
+        Used on stats page to show which food categories
         the user generally prefers.
 
         e.g.
-          cluster 0 → 12 likes, 2 dislikes  (user loves lean protein meals)
-          cluster 3 →  1 like,  8 dislikes  (user dislikes vegetarian meals)
+          A (Lean Protein)   → 12 likes, 2 dislikes
+          C (Heavy Starch)   →  1 like,  8 dislikes
+          D (Green Vegetable)→  6 likes, 1 dislike
         """
         summary = []
         for cluster_id, s in self.cluster_stats.items():
@@ -367,6 +442,7 @@ class PreferenceModel:
             mean_score = (s["alpha"] - 1) / max(total, 1)
             summary.append({
                 "cluster_id": cluster_id,
+                "label":      self.CLUSTER_LABELS.get(cluster_id, "Unknown"),
                 "likes":      s["alpha"] - 1,
                 "dislikes":   s["beta"]  - 1,
                 "score":      round(mean_score, 2)
