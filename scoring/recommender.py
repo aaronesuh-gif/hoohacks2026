@@ -1,6 +1,6 @@
 import sqlite3
 from models.preference_model import PreferenceModel
-from meal_builder   import parse_components_with_clusters
+from utils.calc.meal_builder   import parse_components_with_clusters
 
 preference_model = PreferenceModel()
 DB_PATH          = "database/meals.db"
