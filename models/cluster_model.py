@@ -28,12 +28,6 @@ class ClusterModel:
       G — Sauce / Topping   dressings, condiments, unknowns
                             very high fat% or very low calorie
 
-    WHY RULES OVER KMEANS:
-      KMeans cannot reliably separate chicken from tofu because
-      their macros can overlap significantly. Using protein_type
-      explicitly guarantees they always land in different clusters,
-      which keeps preference signal clean and never bleeds
-      between food types the user treats completely differently.
     """
 
     CLUSTER_LABELS = {
