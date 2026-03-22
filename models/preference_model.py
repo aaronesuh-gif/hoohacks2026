@@ -54,7 +54,7 @@ class PreferenceModel:
         "G": "Sauce / Topping"
     }
 
-    def __init__(self, db_path="database/meals.db"):
+    def __init__(self, db_path="Database/meals.db"):
         self.db_path       = db_path
         self.cluster_stats = {}
         # { "A": {"alpha": int, "beta": int}, "B": {...}, ... }
@@ -67,28 +67,19 @@ class PreferenceModel:
     # ─────────────────────────────────────────────────────
 
     def load_from_db(self):
-        """
-        Loads cluster like/dislike counts from SQLite into memory.
-        Called automatically on startup.
-
-        This is how the model remembers preferences between
-        app sessions — without this every restart forgets everything.
-
-        alpha = likes + 1
-        beta  = dislikes + 1
-        +1 offset so beta(0,0) is never undefined in scipy.
-        """
-        conn = sqlite3.connect(self.db_path)
-        rows = conn.execute(
-            "SELECT cluster_id, likes, dislikes FROM cluster_preferences"
-        ).fetchall()
-        conn.close()
-
-        for cluster_id, likes, dislikes in rows:
-            self.cluster_stats[cluster_id] = {
-                "alpha": likes    + 1,
-                "beta":  dislikes + 1
-            }
+        try:
+            conn = sqlite3.connect(self.db_path)
+            rows = conn.execute(
+                "SELECT cluster_id, likes, dislikes FROM cluster_preferences"
+            ).fetchall()
+            conn.close()
+            for cluster_id, likes, dislikes in rows:
+                self.cluster_stats[cluster_id] = {
+                    "alpha": likes    + 1,
+                    "beta":  dislikes + 1
+                }
+        except Exception:
+            pass  # db not ready yet, starts with empty stats
 
     # ─────────────────────────────────────────────────────
     # SAVING
