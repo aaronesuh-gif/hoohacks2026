@@ -5,7 +5,6 @@ SQLite + SQLAlchemy database for storing dining hall menu items.
 The database file (dining.db) is created automatically on first run.
 """
 
-from datetime import datetime
 from typing import Optional
  
 from sqlalchemy import (
@@ -23,7 +22,7 @@ from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 # Base & Engine
 # ---------------------------------------------------------------------------
  
-DATABASE_URL = "sqlite:///dining.db"
+DATABASE_URL = "sqlite:///Database/dining.db"
 engine = create_engine(DATABASE_URL, echo=False)
 SessionLocal = sessionmaker(bind=engine)
  
