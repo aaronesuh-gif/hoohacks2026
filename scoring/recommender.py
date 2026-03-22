@@ -1,9 +1,9 @@
 import sqlite3
 from models.preference_model import PreferenceModel
-from utils.calc.meal_builder   import parse_components_with_clusters
+from utils.meal_builder  import parse_components_with_clusters
 
 preference_model = PreferenceModel()
-DB_PATH          = "database/meals.db"
+DB_PATH          = "Database/meals.db"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -90,7 +90,7 @@ def get_recommendations():
       score       → preference score 0-1 from cluster history
       confidence  → "love" / "like" / "neutral" / "dislike" / "unknown"
     """
-    ALL_HALLS = ["Runk", "O'Hill", "Newcomb"]
+    ALL_HALLS = ["Runk", "Observatory Hill", "Fresh Food Company"]
     results   = {}
 
     for hall in ALL_HALLS:
