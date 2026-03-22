@@ -34,6 +34,7 @@ class Cluster(Base):
     name      = Column(String, nullable=False, unique=True)  # e.g. "Cluster 1"
     likes   = Column(Integer, default=0, nullable=False)
     dislikes = Column(Integer, default=0, nullable=False)
+    ingredients = Column(String, nullable=True)
 
     def __repr__(self):
         return f"<Cluster name={self.name!r} likes={self.likes} dislikes={self.dislikes}>"

@@ -326,6 +326,7 @@ def item_to_db_format(item, shared_fields, item_type="main", has_low_cal_topping
     return {
         **shared_fields,
         "name":                  item["name"],
+        "ingredients": item.get("ingredients"),
         "item_type":             item_type,
         "base_meal_name":        None,
         "topping_name":          None,

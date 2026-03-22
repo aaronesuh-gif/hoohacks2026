@@ -10,12 +10,13 @@ from typing import Optional
 from sqlalchemy import (
     Boolean,
     Column,
+    DateTime,
     Float,
     Integer,
     String,
     create_engine,
 )
-from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 # ---------------------------------------------------------------------------
 # Base & Engine
@@ -42,31 +43,23 @@ class DiningItem(Base):
  
     # --- Identity ---
     name        = Column(String, nullable=False)
-    dining_hall = Column(String, nullable=False)
-    category    = Column(String, nullable=True)
-    meal_period = Column(String, nullable=True)           # Breakfast, Lunch, Dinner, Brunch
-
-    # --- Item type ---
-    # "main"   = standalone meal
-    # "topping" = low cal topping (<50 cal), shown as optional add-on
-    # "combo"  = auto-generated base meal + high-cal topping (>=50 cal)
-    item_type         = Column(String,  nullable=True, default="main")
-    base_meal_name    = Column(String,  nullable=True)    # for combos: name of the base meal
-    topping_name      = Column(String,  nullable=True)    # for combos: name of the high-cal topping added
-    has_low_cal_toppings = Column(Boolean, default=False) # True if <50 cal toppings are available for this meal
-
+    dining_hall = Column(String, nullable=False)          # e.g. "Newcomb", "Runk"
+    category    = Column(String, nullable=True)           # e.g. "Entrées", "Salad Bar"
+ 
     # --- Nutrition (all per-serving, nullable in case scraper can't find them) ---
-    serving_size    = Column(String,  nullable=True)
-    calories        = Column(Integer, nullable=True)
-    total_fat_g     = Column(Float,   nullable=True)
-    saturated_fat_g = Column(Float,   nullable=True)
-    trans_fat_g     = Column(Float,   nullable=True)
-    cholesterol_mg  = Column(Float,   nullable=True)
-    sodium_mg       = Column(Float,   nullable=True)
-    total_carbs_g   = Column(Float,   nullable=True)
-    dietary_fiber_g = Column(Float,   nullable=True)
-    total_sugars_g  = Column(Float,   nullable=True)
-    protein_g       = Column(Float,   nullable=True)
+    serving_size = Column(String,  nullable=True)         # e.g. "1 cup", "4 oz"
+    ingredients     = Column(String,  nullable=True)  # ← add this
+    item_type       = Column(String,  nullable=True, default="main")  # ← add this
+    calories     = Column(Integer, nullable=True)
+    total_fat_g  = Column(Float,   nullable=True)
+    saturated_fat_g = Column(Float, nullable=True)
+    trans_fat_g  = Column(Float,   nullable=True)
+    cholesterol_mg  = Column(Float, nullable=True)
+    sodium_mg    = Column(Float,   nullable=True)
+    total_carbs_g   = Column(Float, nullable=True)
+    dietary_fiber_g = Column(Float, nullable=True)
+    total_sugars_g  = Column(Float, nullable=True)
+    protein_g    = Column(Float,   nullable=True)
  
     # --- Dietary tags (True = item meets that label) ---
     is_vegan          = Column(Boolean, default=False)
@@ -91,6 +84,7 @@ class Database:
     """Thin wrapper around the SQLAlchemy session for common operations."""
  
     def __init__(self):
+        # Create all tables if they don't exist yet
         Base.metadata.create_all(engine)
         self._Session = SessionLocal
  
@@ -99,6 +93,29 @@ class Database:
     # ------------------------------------------------------------------
  
     def add_item(self, item_data: dict) -> DiningItem:
+        """
+        Insert a single dining item.
+ 
+        Parameters
+        ----------
+        item_data : dict
+            Keys should match DiningItem column names.
+ 
+        Returns
+        -------
+        DiningItem
+            The newly created (and committed) ORM object.
+ 
+        Example
+        -------
+        db.add_item({
+            "name": "Grilled Chicken",
+            "dining_hall": "Newcomb",
+            "calories": 280,
+            "protein_g": 34,
+            "is_gluten_free": True,
+        })
+        """
         with self._Session() as session:
             item = DiningItem(**item_data)
             session.add(item)
@@ -107,6 +124,12 @@ class Database:
             return item
         
     def add_items(self, items: list[dict]) -> int:
+        """
+        Bulk-insert a list of item dicts. Much faster than calling
+        add_item() in a loop for large scraper payloads.
+ 
+        Returns the number of rows inserted.
+        """
         with self._Session() as session:
             session.bulk_insert_mappings(DiningItem, items)
             session.commit()
@@ -117,54 +140,21 @@ class Database:
     # ------------------------------------------------------------------
  
     def get_all_items(self) -> list[DiningItem]:
+        """Return every item in the database."""
         with self._Session() as session:
             return session.query(DiningItem).all()
  
     def get_items_by_hall(self, dining_hall: str) -> list[DiningItem]:
+        """Return all items for a specific dining hall (case-insensitive)."""
         with self._Session() as session:
             return (
                 session.query(DiningItem)
                 .filter(DiningItem.dining_hall.ilike(dining_hall))
                 .all()
             )
-
-    def get_items_by_meal_period(self, meal_period: str) -> list[DiningItem]:
-        """Return all items for a specific meal period (case-insensitive)."""
-        with self._Session() as session:
-            return (
-                session.query(DiningItem)
-                .filter(DiningItem.meal_period.ilike(meal_period))
-                .all()
-            )
-
-    def get_main_meals(self) -> list[DiningItem]:
-        """Return only standalone main meals (not toppings or combos)."""
-        with self._Session() as session:
-            return (
-                session.query(DiningItem)
-                .filter(DiningItem.item_type == "main")
-                .all()
-            )
-
-    def get_combos(self) -> list[DiningItem]:
-        """Return all auto-generated combo meals."""
-        with self._Session() as session:
-            return (
-                session.query(DiningItem)
-                .filter(DiningItem.item_type == "combo")
-                .all()
-            )
-
-    def get_toppings(self) -> list[DiningItem]:
-        """Return all low-cal toppings (<50 cal)."""
-        with self._Session() as session:
-            return (
-                session.query(DiningItem)
-                .filter(DiningItem.item_type == "topping")
-                .all()
-            )
  
     def get_item_by_id(self, item_id: int) -> Optional[DiningItem]:
+        """Return a single item by primary key, or None if not found."""
         with self._Session() as session:
             return session.get(DiningItem, item_id)
  
@@ -176,6 +166,13 @@ class Database:
         halal: bool = False,
         kosher: bool = False,
     ) -> list[DiningItem]:
+        """
+        Return items that match ALL of the requested dietary tags.
+ 
+        Example
+        -------
+        vegan_gf_items = db.filter_by_tags(vegan=True, gluten_free=True)
+        """
         with self._Session() as session:
             query = session.query(DiningItem)
             if vegan:
@@ -191,10 +188,20 @@ class Database:
             return query.all()
  
     def search_by_name(self, query: str) -> list[DiningItem]:
+        """Fuzzy name search (SQL LIKE, case-insensitive)."""
         with self._Session() as session:
             return (
                 session.query(DiningItem)
                 .filter(DiningItem.name.ilike(f"%{query}%"))
+                .all()
+            )
+    
+    def get_main_meals(self) -> list[DiningItem]:
+        """Return only standalone main meals (not toppings or combos)."""
+        with self._Session() as session:
+            return (
+                session.query(DiningItem)
+                .filter(DiningItem.item_type == "main")
                 .all()
             )
     
@@ -203,12 +210,14 @@ class Database:
     # ------------------------------------------------------------------
  
     def clear_all(self) -> int:
+        """Delete every row. Returns the number of rows deleted."""
         with self._Session() as session:
             count = session.query(DiningItem).delete()
             session.commit()
             return count
  
     def delete_item(self, item_id: int) -> bool:
+        """Delete one item by id. Returns True if it existed."""
         with self._Session() as session:
             item = session.get(DiningItem, item_id)
             if item is None:
@@ -216,3 +225,4 @@ class Database:
             session.delete(item)
             session.commit()
             return True
+ 
