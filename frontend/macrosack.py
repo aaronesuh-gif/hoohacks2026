@@ -2,8 +2,7 @@ import streamlit as st
 import sqlite3
 import sys
 import os
-
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from scoring.recommender             import get_recommendations, on_feedback
 from models.preference_model import PreferenceModel

@@ -1,5 +1,5 @@
 from models.cluster_model      import ClusterModel
-from protein_detector    import detect_protein
+from utils.protein_detector import detect_protein
 
 cluster_model = ClusterModel()
 

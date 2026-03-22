@@ -14,7 +14,8 @@ import sqlite3
 import os
 import sys
 
-DB_PATH = "Database/meals.db"
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Database", "meals.db")
 
 os.makedirs("Database", exist_ok=True)
 
@@ -177,6 +178,8 @@ def seed_from_scraper(conn):
     """
     try:
         from Database.db import Database
+        import inspect
+        print(inspect.getfile(Database))
         from utils.meal_builder   import build_todays_meals
         from utils.protein_detector import detect_protein
     except ImportError as e:
@@ -201,7 +204,7 @@ def seed_from_scraper(conn):
             by_hall[hall] = []
         by_hall[hall].append({
             "meal_name":    item.name,
-            "ingredients":  "",
+            "ingredients":  item.ingredients or "",
             "calories":     item.calories or 0,
             "protein":      item.protein_g or 0,
             "carbs":        item.total_carbs_g or 0,
